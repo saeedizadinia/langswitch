@@ -1,6 +1,5 @@
 using LangSwitch.Windows;
 using Microsoft.Win32;
-using System.Buffers;
 using System.Globalization;
 using System.Text;
 
@@ -18,13 +17,13 @@ internal sealed class PhysicalKeyMap
         0x56, 0x73, 0x7D
     ];
 
-    private readonly Dictionary<Rune, string?> replacements = new();
+    private readonly Dictionary<int, string?> replacements = new();
 
     public static bool IsPhysicalLayout(nint layout)
     {
         // ImmIsIME reports some physical layouts as IME-backed on Windows 11.
         // Check the registered IME file and distinguish extended layout IDs from IME handles.
-        uint device = ((uint)layout.ToInt64()) >> 16;
+        uint device = unchecked((uint)(long)layout) >> 16;
         if ((device & 0xF000) == 0xE000 || Native.ImmGetIMEFileName(layout, 0, 0) != 0)
             return false;
         if ((device & 0xF000) != 0xF000)
@@ -56,21 +55,28 @@ internal sealed class PhysicalKeyMap
             state[0x11] = state[Native.LeftControl] = altGr ? (byte)0x80 : (byte)0; // VK_CONTROL
             state[0x12] = state[Native.RightAlt] = altGr ? (byte)0x80 : (byte)0; // VK_MENU
 
-            var layer = new Dictionary<Rune, string?>();
+            var layer = new Dictionary<int, string?>();
             foreach (int scanCode in ScanCodes)
             {
                 string? before = Translate(source, scanCode, state, buffer);
-                if (before is null || Rune.DecodeFromUtf16(before, out Rune rune, out int units) != OperationStatus.Done ||
-                    units != before.Length)
+                if (before is null)
+                    continue;
+                int codePoint = ReadScalar(before, 0, out int units);
+                if (codePoint < 0 || units != before.Length)
                     continue;
 
                 string? after = Translate(destination, scanCode, state, buffer);
-                if (!layer.TryAdd(rune, after) && layer[rune] != after)
-                    layer[rune] = null;
+                if (!layer.TryGetValue(codePoint, out string? existing))
+                    layer.Add(codePoint, after);
+                else if (existing != after)
+                    layer[codePoint] = null;
             }
 
             foreach (var entry in layer)
-                replacements.TryAdd(entry.Key, entry.Value);
+            {
+                if (!replacements.ContainsKey(entry.Key))
+                    replacements.Add(entry.Key, entry.Value);
+            }
         }
     }
 
@@ -83,8 +89,13 @@ internal sealed class PhysicalKeyMap
             return null;
 
         int length = Native.ToUnicodeEx(key, (uint)scan, state, buffer, buffer.Length, noKeyboardStateChange, layout);
-        if (length <= 0 || length > buffer.Length || buffer.AsSpan(0, length).ContainsAnyInRange('\0', '\u001f'))
+        if (length <= 0 || length > buffer.Length)
             return null;
+        for (int index = 0; index < length; index++)
+        {
+            if (buffer[index] <= '\u001f')
+                return null;
+        }
 
         return new string(buffer, 0, length);
     }
@@ -92,19 +103,29 @@ internal sealed class PhysicalKeyMap
     public string Convert(string text)
     {
         var result = new StringBuilder(text.Length);
-        ReadOnlySpan<char> remaining = text;
-        while (!remaining.IsEmpty)
+        for (int index = 0; index < text.Length;)
         {
-            var status = Rune.DecodeFromUtf16(remaining, out Rune rune, out int units);
-            units = Math.Max(1, units);
-            if (status == OperationStatus.Done &&
-                replacements.TryGetValue(rune, out string? replacement) && replacement is not null)
+            int codePoint = ReadScalar(text, index, out int units);
+            if (replacements.TryGetValue(codePoint, out string? replacement) && replacement is not null)
                 result.Append(replacement);
             else
-                result.Append(remaining[..units]);
+                result.Append(text, index, units);
 
-            remaining = remaining[units..];
+            index += units;
         }
         return result.ToString();
+    }
+
+    private static int ReadScalar(string text, int index, out int units)
+    {
+        char first = text[index];
+        units = 1;
+        if (!char.IsSurrogate(first))
+            return first;
+        if (index + 1 >= text.Length || !char.IsSurrogatePair(first, text[index + 1]))
+            return -1;
+
+        units = 2;
+        return char.ConvertToUtf32(first, text[index + 1]);
     }
 }

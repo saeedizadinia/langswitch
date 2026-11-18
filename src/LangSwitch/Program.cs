@@ -13,7 +13,8 @@ internal static class Program
         if (!first)
             return;
 
-        ApplicationConfiguration.Initialize();
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
         try
         {
             using var tray = new TrayContext(args.Contains("--no-startup", StringComparer.Ordinal));

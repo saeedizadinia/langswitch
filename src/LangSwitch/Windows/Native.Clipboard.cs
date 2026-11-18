@@ -18,6 +18,8 @@ internal static partial class Native
     public static extern nint GetClipboardOwner();
     [DllImport("user32", SetLastError = true)]
     public static extern uint EnumClipboardFormats(uint format);
+    [DllImport("kernel32")]
+    public static extern void SetLastError(uint error);
     [DllImport("user32")]
     public static extern nint GetClipboardData(uint format);
     [DllImport("user32")]

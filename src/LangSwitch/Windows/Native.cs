@@ -52,6 +52,8 @@ internal static partial class Native
 
     [DllImport("kernel32", CharSet = CharSet.Unicode)]
     public static extern nint GetModuleHandle(string? name);
+    [DllImport("kernel32")]
+    public static extern uint GetCurrentProcessId();
     [DllImport("user32")]
     public static extern nint GetForegroundWindow();
     [DllImport("user32")]

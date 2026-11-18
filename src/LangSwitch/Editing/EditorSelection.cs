@@ -18,7 +18,7 @@ internal sealed record EditorSelection(int[]? RuntimeId, SelectionKind Kind, str
 
         bool sameElement = RuntimeId is null
             ? other.RuntimeId is null
-            : other.RuntimeId is not null && RuntimeId.AsSpan().SequenceEqual(other.RuntimeId);
+            : other.RuntimeId is not null && RuntimeId.SequenceEqual(other.RuntimeId);
         return sameElement && (Range is null || (other.Range is not null && Range.Compare(other.Range)));
     }
 }

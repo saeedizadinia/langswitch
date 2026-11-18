@@ -57,7 +57,7 @@ internal sealed class ConversionCoordinator(nint clipboardWindow)
         string? text = selection.Kind == SelectionKind.Text
             ? selection.Text
             : await clipboard.ReadAsync(origin, TargetIsCurrent, inputIsCurrent);
-        if (text is null || text.Contains('\0') || !TargetIsCurrent())
+        if (text is null || text.IndexOf('\0') >= 0 || !TargetIsCurrent())
             return;
 
         string replacement = map.Convert(text);

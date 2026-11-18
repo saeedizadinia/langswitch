@@ -11,14 +11,14 @@ internal sealed class ClipboardCopy(nint window)
     private const int CopyTimeoutMilliseconds = 325;
     private const int RetryDelayMilliseconds = 15;
     private const int ClipboardAllocationPadding = 32;
-    private static readonly HashSet<uint> MemoryFormats = new uint[]
+    private static readonly HashSet<uint> MemoryFormats = new()
     {
         1, 7, 8, Native.ClipboardUnicodeText, 15, 16, 17, // Text, OEM text, DIB, file drop, locale, DIB V5
         Native.RegisterClipboardFormat("HTML Format"), Native.RegisterClipboardFormat("Rich Text Format"),
         Native.RegisterClipboardFormat("UniformResourceLocatorW"), Native.RegisterClipboardFormat("UniformResourceLocator"),
         Native.RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing"),
         Native.RegisterClipboardFormat("CanIncludeInClipboardHistory"), Native.RegisterClipboardFormat("CanUploadToCloudClipboard")
-    }.ToHashSet();
+    };
 
     public async Task<string?> ReadAsync(DesktopTarget target, Func<bool> targetIsCurrent, Func<bool> inputIsCurrent)
     {
@@ -61,11 +61,12 @@ internal sealed class ClipboardCopy(nint window)
             uint format = 0;
             while (true)
             {
-                Marshal.SetLastPInvokeError(0);
+                // A zero result can mean either the end of the list or an error.
+                Native.SetLastError(0);
                 format = Native.EnumClipboardFormats(format);
                 if (format == 0)
                 {
-                    if (Marshal.GetLastPInvokeError() != 0)
+                    if (Marshal.GetLastWin32Error() != 0)
                         return null;
                     break;
                 }
@@ -110,10 +111,11 @@ internal sealed class ClipboardCopy(nint window)
             string? text = null;
             if (bytes is not null)
             {
-                ReadOnlySpan<char> chars = MemoryMarshal.Cast<byte, char>(bytes);
-                int end = chars.IndexOf('\0');
+                var chars = new char[bytes.Length / sizeof(char)];
+                Buffer.BlockCopy(bytes, 0, chars, 0, chars.Length * sizeof(char));
+                int end = Array.IndexOf(chars, '\0');
                 if (end is > 0 and <= EditorProbe.TextLimit)
-                    text = chars[..end].ToString();
+                    text = new string(chars, 0, end);
             }
             return new Copy(Native.GetClipboardSequenceNumber(), owner, text);
         }

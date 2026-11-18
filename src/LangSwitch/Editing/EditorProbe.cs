@@ -32,7 +32,12 @@ internal sealed class EditorProbe
                 worker.Release();
             }
         });
-        return await pending.WaitAsync(ProviderTimeout);
+        using var timeout = new CancellationTokenSource();
+        if (await Task.WhenAny(pending, Task.Delay(ProviderTimeout, timeout.Token)) != pending)
+            throw new TimeoutException();
+
+        timeout.Cancel();
+        return await pending;
     }
 
     private static EditorSelection? Read(DesktopTarget target, bool nativeWritable)
