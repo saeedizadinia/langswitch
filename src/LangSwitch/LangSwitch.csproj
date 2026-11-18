@@ -5,13 +5,16 @@
     <LangVersion>14.0</LangVersion>
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.1</Version>
+    <ApplicationIcon>Assets/LangSwitch.ico</ApplicationIcon>
+    <Version>1.0.2</Version>
     <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets/LangSwitch.ico" LogicalName="LangSwitch.Tray.Active.ico" />
+    <EmbeddedResource Include="Assets/LangSwitch-paused.ico" LogicalName="LangSwitch.Tray.Paused.ico" />
     <InternalsVisibleTo Include="LangSwitch.Checks" />
   </ItemGroup>
 </Project>

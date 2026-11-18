@@ -15,6 +15,8 @@ internal sealed class TrayContext : ApplicationContext
     private readonly Control dispatcher = new();
     private readonly ContextMenuStrip menu = new();
     private readonly NotifyIcon icon;
+    private readonly Icon activeIcon;
+    private readonly Icon pausedIcon;
     private readonly ToolStripMenuItem startupItem;
     private readonly DesktopInput input;
     private readonly ConversionCoordinator conversion;
@@ -24,12 +26,15 @@ internal sealed class TrayContext : ApplicationContext
     {
         conversion = new ConversionCoordinator(dispatcher.Handle);
         input = new DesktopInput(QueueConversion);
-        icon = new NotifyIcon { Icon = SystemIcons.Application, Text = "LangSwitch", ContextMenuStrip = menu };
+        activeIcon = LoadTrayIcon("LangSwitch.Tray.Active.ico");
+        pausedIcon = LoadTrayIcon("LangSwitch.Tray.Paused.ico");
+        icon = new NotifyIcon { Icon = activeIcon, Text = "LangSwitch", ContextMenuStrip = menu };
 
         var pause = new ToolStripMenuItem("Pause") { CheckOnClick = true };
         pause.CheckedChanged += (_, _) =>
         {
             input.Paused = pause.Checked;
+            icon.Icon = pause.Checked ? pausedIcon : activeIcon;
             icon.Text = pause.Checked ? "LangSwitch (paused)" : "LangSwitch";
         };
         startupItem = new ToolStripMenuItem("Start at sign-in");
@@ -37,6 +42,13 @@ internal sealed class TrayContext : ApplicationContext
         menu.Items.AddRange([pause, startupItem, new ToolStripSeparator(), new ToolStripMenuItem("Exit", null, (_, _) => CloseAsync())]);
         icon.Visible = true;
         UpdateStartup(skipStartupRegistration ? static () => { } : Startup.Initialize);
+    }
+
+    private static Icon LoadTrayIcon(string resourceName)
+    {
+        using var stream = typeof(TrayContext).Assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Missing tray icon resource {resourceName}.");
+        return new Icon(stream, SystemInformation.SmallIconSize);
     }
 
     private void QueueConversion(DesktopTarget origin, long generation)
@@ -86,6 +98,8 @@ internal sealed class TrayContext : ApplicationContext
         {
             input.Dispose();
             icon.Dispose();
+            activeIcon.Dispose();
+            pausedIcon.Dispose();
             menu.Dispose();
             dispatcher.Dispose();
         }
