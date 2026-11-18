@@ -8,7 +8,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="tests/**/*.cs" />
     <InternalsVisibleTo Include="LangSwitch.Checks" />
   </ItemGroup>
 </Project>

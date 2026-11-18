@@ -1,9 +1,10 @@
+using LangSwitch.Windows;
 using Microsoft.Win32;
 using System.Buffers;
 using System.Globalization;
 using System.Text;
 
-namespace LangSwitch;
+namespace LangSwitch.Conversion;
 
 internal sealed class PhysicalKeyMap
 {

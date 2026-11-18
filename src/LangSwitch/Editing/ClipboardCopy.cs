@@ -1,11 +1,16 @@
+using LangSwitch.Windows;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace LangSwitch;
+namespace LangSwitch.Editing;
 
 internal sealed class ClipboardCopy(nint window)
 {
     private const int SnapshotLimit = 16 * 1024 * 1024;
+    private const int RestoreAttempts = 8;
+    private const int CopyTimeoutMilliseconds = 325;
+    private const int RetryDelayMilliseconds = 15;
+    private const int ClipboardAllocationPadding = 32;
     private static readonly HashSet<uint> MemoryFormats = new uint[]
     {
         1, 7, 8, Native.ClipboardUnicodeText, 15, 16, 17, // Text, OEM text, DIB, file drop, locale, DIB V5
@@ -15,30 +20,30 @@ internal sealed class ClipboardCopy(nint window)
         Native.RegisterClipboardFormat("CanIncludeInClipboardHistory"), Native.RegisterClipboardFormat("CanUploadToCloudClipboard")
     }.ToHashSet();
 
-    public async Task<string?> ReadAsync(DesktopTarget target, Func<bool> current, Func<bool> inputIsCurrent)
+    public async Task<string?> ReadAsync(DesktopTarget target, Func<bool> targetIsCurrent, Func<bool> inputIsCurrent)
     {
         using var snapshot = await Task.Run(TakeSnapshot);
-        if (snapshot is null || !current() || Native.ModifierDown() || Native.GetClipboardSequenceNumber() != snapshot.Sequence)
+        if (snapshot is null || !targetIsCurrent() || Native.ModifierDown() || Native.GetClipboardSequenceNumber() != snapshot.Sequence)
             return null;
 
         if (!Native.SendCopy())
             return null;
         var elapsed = Stopwatch.StartNew();
-        while (elapsed.ElapsedMilliseconds < 325 && current())
+        while (elapsed.ElapsedMilliseconds < CopyTimeoutMilliseconds && targetIsCurrent())
         {
-            var copy = await Task.Run(() => ReadCopy(target, snapshot.Sequence, inputIsCurrent));
+            var copy = await Task.Run(() => ReadOwnedCopy(target, snapshot.Sequence, inputIsCurrent));
             if (copy is not null)
             {
                 // Restore under the clipboard lock, even if focus changed after reading the copy.
-                for (int attempt = 0; attempt < 8; attempt++)
+                for (int attempt = 0; attempt < RestoreAttempts; attempt++)
                 {
                     if (await Task.Run(() => Restore(snapshot, copy)))
                         break;
-                    await Task.Delay(15);
+                    await Task.Delay(RetryDelayMilliseconds);
                 }
-                return current() ? copy.Text : null;
+                return targetIsCurrent() ? copy.Text : null;
             }
-            await Task.Delay(15);
+            await Task.Delay(RetryDelayMilliseconds);
         }
         return null;
     }
@@ -90,7 +95,7 @@ internal sealed class ClipboardCopy(nint window)
         }
     }
 
-    private Copy? ReadCopy(DesktopTarget target, uint originalSequence, Func<bool> inputIsCurrent)
+    private Copy? ReadOwnedCopy(DesktopTarget target, uint originalSequence, Func<bool> inputIsCurrent)
     {
         if (!inputIsCurrent() || Native.GetClipboardSequenceNumber() == originalSequence || !Native.OpenClipboard(window))
             return null;
@@ -101,7 +106,7 @@ internal sealed class ClipboardCopy(nint window)
             if (!target.OwnsWindow(owner) || Native.GetClipboardSequenceNumber() == originalSequence || !inputIsCurrent())
                 return null;
 
-            byte[]? bytes = ReadMemory(Native.ClipboardUnicodeText, (EditorProbe.TextLimit + 32) * sizeof(char));
+            byte[]? bytes = ReadMemory(Native.ClipboardUnicodeText, (EditorProbe.TextLimit + ClipboardAllocationPadding) * sizeof(char));
             string? text = null;
             if (bytes is not null)
             {

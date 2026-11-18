@@ -1,48 +1,28 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-namespace LangSwitch;
-
-internal readonly record struct DesktopTarget(nint Window, nint Focus, uint Thread, uint Process, uint FocusProcess, nint Layout)
-{
-    public static DesktopTarget? Capture()
-    {
-        nint window = Native.GetForegroundWindow();
-        if (window == 0)
-            return null;
-
-        uint windowThread = Native.GetWindowThreadProcessId(window, out uint process);
-        if (windowThread == 0 || process == Environment.ProcessId)
-            return null;
-
-        var info = new Native.GuiThreadInfo { Size = (uint)Marshal.SizeOf<Native.GuiThreadInfo>() };
-        if (!Native.GetGUIThreadInfo(windowThread, ref info) || info.Focus == 0 || (info.Flags & 0x1E) != 0)
-            return null;
-
-        uint thread = Native.GetWindowThreadProcessId(info.Focus, out uint focusProcess);
-        nint layout = thread == 0 ? 0 : Native.GetKeyboardLayout(thread);
-        return layout == 0 || Native.GetForegroundWindow() != window
-            ? null
-            : new DesktopTarget(window, info.Focus, thread, process, focusProcess, layout);
-    }
-
-    public bool SameEditor(DesktopTarget other) =>
-        Window == other.Window && Focus == other.Focus && Thread == other.Thread &&
-        Process == other.Process && FocusProcess == other.FocusProcess;
-
-    public bool OwnsWindow(nint window)
-    {
-        uint pid = Native.WindowProcess(window);
-        return pid != 0 && (pid == Process || pid == FocusProcess);
-    }
-}
+namespace LangSwitch.Windows;
 
 internal sealed class DesktopInput : IDisposable
 {
+    private const int LowLevelKeyboardHook = 13;
+    private const int LowLevelMouseHook = 14;
+    private const int MouseMove = 0x0200;
+
+    [Flags]
+    private enum ChordKeys
+    {
+        None = 0,
+        LeftAlt = 1,
+        LeftShift = 2,
+        RightShift = 4,
+        Shift = LeftShift | RightShift
+    }
+
     private readonly Action<DesktopTarget, long> switched;
     private readonly Native.Hook keyboardCallback, mouseCallback;
     private readonly nint keyboardHook, mouseHook;
-    private int held;
+    private ChordKeys held;
     private bool overlapped, paused, disposed;
     private long generation;
     private DesktopTarget? origin;
@@ -53,11 +33,11 @@ internal sealed class DesktopInput : IDisposable
         keyboardCallback = Keyboard;
         mouseCallback = Mouse;
         nint module = Native.GetModuleHandle(null);
-        keyboardHook = Native.SetWindowsHookEx(13, keyboardCallback, module, 0); // WH_KEYBOARD_LL
+        keyboardHook = Native.SetWindowsHookEx(LowLevelKeyboardHook, keyboardCallback, module, 0);
         if (keyboardHook == 0)
             throw new Win32Exception();
 
-        mouseHook = Native.SetWindowsHookEx(14, mouseCallback, module, 0); // WH_MOUSE_LL
+        mouseHook = Native.SetWindowsHookEx(LowLevelMouseHook, mouseCallback, module, 0);
         if (mouseHook == 0)
         {
             var error = new Win32Exception();
@@ -96,14 +76,14 @@ internal sealed class DesktopInput : IDisposable
     private void ObserveKey(int key, bool down)
     {
         Interlocked.Increment(ref generation);
-        int bit = key switch
+        var chordKey = key switch
         {
-            Native.LeftAlt => 1,
-            Native.LeftShift => 2,
-            Native.RightShift => 4,
-            _ => 0
+            Native.LeftAlt => ChordKeys.LeftAlt,
+            Native.LeftShift => ChordKeys.LeftShift,
+            Native.RightShift => ChordKeys.RightShift,
+            _ => ChordKeys.None
         };
-        if (bit == 0)
+        if (chordKey == ChordKeys.None)
         {
             origin = null;
             return;
@@ -111,19 +91,19 @@ internal sealed class DesktopInput : IDisposable
 
         if (down)
         {
-            if (held == 0 && !paused && !OtherModifiersDown())
+            if (held == ChordKeys.None && !paused && !OtherModifiersDown())
             {
                 origin = DesktopTarget.Capture();
                 overlapped = false;
             }
-            held |= bit;
-            if ((held & 1) != 0 && (held & 6) != 0)
+            held |= chordKey;
+            if ((held & ChordKeys.LeftAlt) != 0 && (held & ChordKeys.Shift) != 0)
                 overlapped = true;
             return;
         }
 
-        held &= ~bit;
-        if (held != 0)
+        held &= ~chordKey;
+        if (held != ChordKeys.None)
             return;
 
         if (overlapped && origin is { } captured)
@@ -134,11 +114,12 @@ internal sealed class DesktopInput : IDisposable
 
     private static bool OtherModifiersDown() => Native.IsDown(Native.LeftControl) || Native.IsDown(Native.RightControl) ||
         Native.IsDown(Native.RightAlt) || Native.IsDown(Native.LeftWin) || Native.IsDown(Native.RightWin) ||
-        Native.IsDown(1) || Native.IsDown(2) || Native.IsDown(4) || Native.IsDown(5) || Native.IsDown(6);
+        Native.IsDown(Native.LeftButton) || Native.IsDown(Native.RightButton) || Native.IsDown(Native.MiddleButton) ||
+        Native.IsDown(Native.XButton1) || Native.IsDown(Native.XButton2);
 
     private nint Mouse(int code, nint message, nint data)
     {
-        if (code >= 0 && (int)message != 0x0200) // Pointer motion alone does not invalidate the selection.
+        if (code >= 0 && (int)message != MouseMove) // Pointer motion alone does not invalidate the selection.
             Invalidate();
         return Native.CallNextHookEx(0, code, message, data);
     }
